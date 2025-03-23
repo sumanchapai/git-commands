@@ -76,7 +76,13 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     <script>
         document.getElementById("gitForm").onsubmit = async function(event) {
             event.preventDefault();
-            let command = document.getElementById("command").value.split(" ");
+            let commandStr = document.getElementById("command").value
+            // Optional prefix: GIT
+            let prefix = "git "
+            if (commandStr.startsWith(prefix)){
+              commandStr = commandStr.slice(prefix.length) 
+            }
+            let command = commandStr.split(" ");
             let response = await fetch("/git/run", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
