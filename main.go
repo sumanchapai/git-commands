@@ -79,6 +79,9 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     <h2>Git Status</h2>
     <pre>%s</pre>
 
+    <h2>Some Helpful Commands</h2>
+    <pre>log --decorate --oneline --graph</pre>
+
     <h2>Run Git Command</h2>
     <form id="gitForm">
         <input type="text" id="command" placeholder="Enter git command (e.g., log --oneline)" style="width: 80%%;">
@@ -175,4 +178,3 @@ func main() {
 	http.HandleFunc("/git/run", gitCommandHandler)
 	log.Fatal(http.ListenAndServe(":7001", nil))
 }
-
