@@ -1,3 +1,8 @@
+# Git Commands
+
+This is a go server that allows users to run specific git commands on a
+specificied directory via HTML frontend.
+
 Run as follows:
 
 ```
