@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Get Git repository path from ENV variable, fallback if not set
@@ -18,7 +19,6 @@ func getRepoPath() string {
 	if path, exists := os.LookupEnv("GIT_REPO_PATH"); exists {
 		return path
 	}
-
 	return "/Users/suman/Desktop/superview/accounting" // Change this to a reasonable fallback
 }
 
@@ -32,8 +32,7 @@ func runGit(command ...string) (string, error) {
 	cmd := exec.Command("git", command...)
 	cmd.Dir = gitRepoPath // Enforce the working directory
 
-	var out bytes.Buffer
-	var stderr bytes.Buffer
+	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 
@@ -42,6 +41,21 @@ func runGit(command ...string) (string, error) {
 		return stderr.String(), err
 	}
 	return out.String(), nil
+}
+
+// Allowed Git commands (ensures security)
+var allowedCommands = map[string]bool{
+	"status":   true,
+	"log":      true,
+	"diff":     true,
+	"pull":     true,
+	"push":     true,
+	"add":      true,
+	"commit":   true,
+	"checkout": true,
+	"branch":   true,
+	"reset":    true,
+	"merge":    true,
 }
 
 // rootHandler: Serve the main page with Git status and a command input form
@@ -58,7 +72,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         textarea { width: 100%%; height: 100px; }
-        pre { background: #f4f4f4; padding: 10px; }
+        pre { background: #f4f4f4; padding: 10px; white-space: pre-wrap; }
     </style>
 </head>
 <body>
@@ -76,17 +90,18 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     <script>
         document.getElementById("gitForm").onsubmit = async function(event) {
             event.preventDefault();
-            let commandStr = document.getElementById("command").value
-            // Optional prefix: GIT
-            let prefix = "git "
-            if (commandStr.startsWith(prefix)){
-              commandStr = commandStr.slice(prefix.length) 
+            let commandStr = document.getElementById("command").value.trim();
+
+            if (commandStr.length === 0) {
+                alert("Please enter a command.");
+                return;
             }
-            let command = commandStr.split(" ");
+
+            let commandParts = commandStr.split(" ");
             let response = await fetch("/git/run", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ command })
+                body: JSON.stringify({ command: commandParts })
             });
             let result = await response.text();
             document.getElementById("output").innerText = result;
@@ -108,24 +123,33 @@ func gitCommandHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate allowed Git commands
-	allowedCommands := map[string]bool{
-		"status":   true,
-		"log":      true,
-		"diff":     true,
-		"pull":     true,
-		"push":     true,
-		"add":      true,
-		"commit":   true,
-		"checkout": true,
-		"branch":   true,
-	}
+	// Extract base command
+	baseCmd := cmd.Command[0]
 
-	if !allowedCommands[cmd.Command[0]] {
+	// Check if command is allowed
+	if !allowedCommands[baseCmd] {
 		http.Error(w, "Forbidden command", http.StatusForbidden)
 		return
 	}
 
+	// Special case for `git commit -m "message"`
+	if baseCmd == "commit" {
+		if len(cmd.Command) < 3 || cmd.Command[1] != "-m" {
+			http.Error(w, "Invalid commit format. Use: commit -m \"message\"", http.StatusBadRequest)
+			return
+		}
+		// Rejoin commit message
+		msg := strings.Join(cmd.Command[2:], " ")
+		output, err := runGit("commit", "-m", msg)
+		if err != nil {
+			http.Error(w, output, http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(output))
+		return
+	}
+
+	// Run generic allowed commands
 	output, err := runGit(cmd.Command...)
 	if err != nil {
 		http.Error(w, output, http.StatusInternalServerError)
@@ -151,3 +175,4 @@ func main() {
 	http.HandleFunc("/git/run", gitCommandHandler)
 	log.Fatal(http.ListenAndServe(":7001", nil))
 }
+
