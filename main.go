@@ -45,6 +45,7 @@ func runGit(command ...string) (string, error) {
 
 // Allowed Git commands (ensures security)
 var allowedCommands = map[string]bool{
+	"show":     true,
 	"status":   true,
 	"log":      true,
 	"diff":     true,
@@ -78,6 +79,11 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 <body>
     <h2>Git Status</h2>
     <pre>%s</pre>
+
+    <h2>Standard Workflow</h2>
+    <pre>add main.bean</pre>
+    <pre>commit -m "your commit message here, example: add data until feb 15 or add missing transaction, or fix signs"</pre>
+    <pre>push</pre>
 
     <h2>Some Helpful Commands</h2>
     <pre>log --decorate --oneline --graph</pre>
