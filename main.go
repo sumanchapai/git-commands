@@ -179,8 +179,8 @@ func main() {
 		log.Fatalf("Git repo directory does not exist: %s", absPath)
 	}
 
-	log.Println("Git server running on :7001 in directory:", absPath)
+	log.Println("Git server running on 127.0.0.1:7001 in directory:", absPath)
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/git/run", gitCommandHandler)
-	log.Fatal(http.ListenAndServe(":7001", nil))
+	log.Fatal(http.ListenAndServe("127.0.0.1:7001", nil))
 }
