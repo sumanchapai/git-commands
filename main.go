@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -79,25 +80,43 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 <body>
     <h2>Git Status</h2>
     <pre>%s</pre>
-
-    <h2>Standard Workflow</h2>
-    <pre>add main.bean</pre>
-    <pre>commit -m "your commit message here, example: add data until feb 15 or add missing transaction, or fix signs"</pre>
-    <pre>push</pre>
-
-    <h2>Some Helpful Commands</h2>
-    <pre>log --decorate --oneline --graph</pre>
+    <h2>Create PR with Edits</h2>
+    <button onclick="createPR()">Create PR</button>
+    <pre id="prOutput"></pre>
+    <h2>Pull Origin Main</h2>
+    <button id="pullOriginMainButton">Pull origin/main</button>
+    <h3>Pull Output:</h3>
+    <pre id="pullOutput"></pre>
 
     <h2>Run Git Command</h2>
     <form id="gitForm">
-        <input type="text" id="command" placeholder="Enter git command (e.g., log --oneline)" style="width: 80%%;">
-        <button type="submit">Run</button>
+      <input type="text" id="command" placeholder="Enter git command (e.g., log --oneline)" style="width: 80%%;">
+      <button type="submit">Run</button>
     </form>
     <h3>Output:</h3>
     <pre id="output"></pre>
 
     <script>
-        document.getElementById("gitForm").onsubmit = async function(event) {
+    // Fill the command textbox with the pull command and submit
+    document.getElementById("pullOriginMainButton").onclick = function() {
+      // Fill in the command input with "git pull origin main"
+      document.getElementById("command").value = "pull origin main";
+      
+      // Automatically submit the form
+      document.getElementById("gitForm").submit();
+    };
+
+    function createPR() {
+        fetch("/git/create-pr-with-edits", { method: "POST" })
+            .then(resp => resp.text())
+            .then(text => {
+                document.getElementById("prOutput").innerText = text;
+            })
+            .catch(err => {
+                document.getElementById("prOutput").innerText = "Error: " + err;
+            });
+    }
+    document.getElementById("gitForm").onsubmit = async function(event) {
             event.preventDefault();
             let commandStr = document.getElementById("command").value.trim();
 
@@ -129,6 +148,7 @@ func gitCommandHandler(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&cmd)
 	if err != nil || len(cmd.Command) == 0 {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
+		log.Println(err)
 		return
 	}
 
@@ -152,6 +172,7 @@ func gitCommandHandler(w http.ResponseWriter, r *http.Request) {
 		output, err := runGit("commit", "-m", msg)
 		if err != nil {
 			http.Error(w, output, http.StatusInternalServerError)
+			log.Println(err)
 			return
 		}
 		w.Write([]byte(output))
@@ -162,14 +183,115 @@ func gitCommandHandler(w http.ResponseWriter, r *http.Request) {
 	output, err := runGit(cmd.Command...)
 	if err != nil {
 		http.Error(w, output, http.StatusInternalServerError)
+		log.Println(err)
 		return
 	}
 
 	w.Write([]byte(output))
 }
 
+// createPRHandler: Creates a PR after committing main.bean to edit branch
+func createPrHandler(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Get current branch
+	currentBranch, err := runGit("rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		http.Error(w, "Failed to get current branch: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	currentBranch = strings.TrimSpace(currentBranch)
+
+	// Defer switch back to main
+	defer func() {
+		_, err := runGit("checkout", "main")
+		if err != nil {
+			log.Printf("Failed to switch back to main branch: %v", err)
+		}
+		_, err = runGit("pull", "origin", "main")
+		if err != nil {
+			log.Printf("Failed to pull origin main: %v", err)
+		}
+	}()
+
+	// Step 2: Switch to "edit" branch if not already on it
+	if currentBranch != "edit" {
+		_, err := runGit("checkout", "-B", "edit")
+		if err != nil {
+			http.Error(w, "Failed to switch to edit branch: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Step 3: Add main.bean
+	_, err = runGit("add", "main.bean")
+	if err != nil {
+		http.Error(w, "Failed to add file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 4: Check for staged changes
+	diffCmd := exec.Command("git", "diff", "--cached", "--quiet")
+	diffCmd.Dir = gitRepoPath
+	err = diffCmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// There are staged changes
+			_, err = runGit("commit", "-m", "add data")
+			if err != nil {
+				http.Error(w, "Commit failed: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			http.Error(w, "Error checking staged changes: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		fmt.Fprintf(w, "No changes to commit")
+		log.Println("No changes to commit.")
+		return
+	}
+
+	// Check if origin/edit exists
+	_, err = runGit("ls-remote", "--exit-code", "--heads", "origin", "edit")
+	if err == nil {
+		// origin/edit exists, merge it too
+		_, err = runGit("merge", "origin/edit")
+		if err != nil {
+			http.Error(w, "Failed to merge origin/edit: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Step 5: Push the branch to origin
+	_, err = runGit("push", "-u", "origin", "edit")
+	if err != nil {
+		http.Error(w, "Failed to push branch: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 6: Create PR
+	cmd := exec.Command("gh", "pr", "create", "--fill")
+	cmd.Dir = gitRepoPath
+
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		http.Error(w, "Failed to create PR: "+stderr.String()+"\n"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 7: Return PR output
+	w.Write([]byte(out.String()))
+}
+
 // main starts the server
 func main() {
+	// Parse optional port argument
+	port := flag.String("port", "7001", "Port to run the server on")
+	flag.Parse()
+
 	// Ensure the Git repo directory exists
 	absPath, err := filepath.Abs(gitRepoPath)
 	if err != nil {
@@ -179,8 +301,10 @@ func main() {
 		log.Fatalf("Git repo directory does not exist: %s", absPath)
 	}
 
-	log.Println("Git server running on 127.0.0.1:7001 in directory:", absPath)
+	addr := "127.0.0.1:" + *port
+	log.Println("Git server running on", addr, "in directory:", absPath)
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/git/run", gitCommandHandler)
-	log.Fatal(http.ListenAndServe("127.0.0.1:7001", nil))
+	http.HandleFunc("/git/create-pr-with-edits", createPrHandler)
+	log.Fatal(http.ListenAndServe(addr, nil))
 }
