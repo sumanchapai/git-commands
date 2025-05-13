@@ -16,11 +16,18 @@ import (
 // Get Git repository path from ENV variable, fallback if not set
 var gitRepoPath = getRepoPath()
 
+func getRepoURL() string {
+	if path, exists := os.LookupEnv("GIT_REPO_URL"); exists {
+		return path
+	}
+	return "https://github.com/sumanchapai/superview-accounting"
+}
+
 func getRepoPath() string {
 	if path, exists := os.LookupEnv("GIT_REPO_PATH"); exists {
 		return path
 	}
-	return "/Users/suman/Desktop/projects/superview/superview-accounting" // Change this to a reasonable fallback
+	return "/Users/suman/Desktop/projects/superview/superview-accounting"
 }
 
 // GitCommand represents a request to run a git command.
@@ -99,6 +106,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     </style>
 </head>
 <body>
+  <a href="%s">%s</a>
   <div class="responsive-grid">
     <div>
       <div style="border: 1px solid black; margin-top: 2rem;">
@@ -212,13 +220,17 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
     </script>
 </body>
-</html>`)
+</html>`, getRepoURL(), getRepoURL())
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
 }
 
 func diffHandler(w http.ResponseWriter, r *http.Request) {
+	header := r.Header
+	for k := range header {
+		fmt.Println(k, header.Get(k))
+	}
 	gitDiff, err := runGit("diff")
 	if err != nil {
 		http.Error(w, "Failed to get git diff: "+err.Error(), http.StatusInternalServerError)
@@ -331,7 +343,12 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 			if len(commitMsg) > 300 {
 				commitMsg = commitMsg[:300] + "…"
 			}
-			_, err = runGit("commit", "-m", commitMsg)
+			authorEmail := r.Header.Get("Cf-Access-Authenticated-User-Email")
+			if authorEmail != "" {
+				_, err = runGit("commit", "-m", commitMsg, "--author", fmt.Sprintf("X <%s>", authorEmail))
+			} else {
+				_, err = runGit("commit", "-m", commitMsg)
+			}
 			if err != nil {
 				http.Error(w, "Commit failed: "+err.Error(), http.StatusInternalServerError)
 				return
