@@ -62,61 +62,101 @@ var allowedCommands = map[string]bool{
 
 // rootHandler: Serve the main page with Git status and a command input form
 func rootHandler(w http.ResponseWriter, r *http.Request) {
-	gitStatus, err := runGit("status")
-	if err != nil {
-		gitStatus = fmt.Sprintf("Error getting git status: %s", err.Error())
-	}
-
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
     <title>Git Server</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        textarea { width: 100%%; height: 100px; }
-        pre { background: #f4f4f4; padding: 10px; white-space: pre-wrap; }
+      body { font-family: Arial, sans-serif; margin: 20px; }
+      textarea { width: 100%%; height: 100px; }
+      pre { background: #f4f4f4; padding: 10px; white-space: pre-wrap; font-family: monospace; }
+
+      .diff-output {
+      background: #f6f8fa;
+      border: 1px solid #ccc;
+      padding: 10px;
+      overflow-x: auto;
+      white-space: pre;
+      overflow-y: auto;
+      max-height: 60vh;
+      }
+
+      .diff-addition { color: #22863a; background-color: #e6ffed; }
+      .diff-deletion { color: #b31d28; background-color: #ffeef0; }
+      .diff-hunk     { color: #6a737d; font-weight: bold; }
+
+      .responsive-grid {
+        display: grid;
+        grid-template-columns: 1fr; /* default: single column on small screens */
+        gap: 1rem;
+      }
+
+    @media (min-width: 768px) {
+      .responsive-grid {
+        grid-template-columns: 40%% 60%%; /* two columns on medium and up */
+      }
+    }
     </style>
 </head>
 <body>
-    <h2>Git Status</h2>
-    <pre>%s</pre>
-    <h2>Create PR with Edits</h2>
-    <button onclick="createPR()">Create PR</button>
-    <pre id="prOutput"></pre>
-    <h2>Pull Origin Main</h2>
-    <button id="pullOriginMainButton">Pull origin/main</button>
-    <h3>Pull Output:</h3>
-    <pre id="pullOutput"></pre>
+  <div class="responsive-grid">
+    <div>
+      <div style="border: 1px solid black; margin-top: 2rem;">
+      <h2>Create PR with Edits</h2>
+      <button onclick="createPR()">Create PR</button>
+      <pre id="prOutput"></pre>
+      </div>
 
-    <h2>Run Git Command</h2>
-    <form id="gitForm">
-      <input type="text" id="command" placeholder="Enter git command (e.g., log --oneline)" style="width: 80%%;">
-      <button type="submit">Run</button>
-    </form>
+      <div style="border: 1px solid orange; margin-top: 2rem;">
+      <h2>Run Git Command</h2>
+      <form id="gitForm">
+        <input type="text" id="command" placeholder="Enter git command (e.g., log --oneline)" style="width: 80%%;">
+        <button type="submit">Run</button>
+      </form>
+      <h3>Output:</h3>
+      <pre id="output"></pre>
+      </div>
+    </div>
+
+    <div style="border: 1px solid blue; margin-top: 2rem">
+    <h2 >Git Diff</h2>
     <h3>Output:</h3>
-    <pre id="output"></pre>
+    <pre id="diffOutput" class="diff-output">Loading git diff...</pre>
+
+    </div>
+  </div>
 
     <script>
-    // Fill the command textbox with the pull command and submit
-    document.getElementById("pullOriginMainButton").onclick = function() {
-      // Fill in the command input with "git pull origin main"
-      document.getElementById("command").value = "pull origin main";
-      
-      // Automatically submit the form
-      document.getElementById("gitForm").submit();
-    };
-
     function createPR() {
-        fetch("/git/create-pr-with-edits", { method: "POST" })
+        let message = prompt("Enter your commit message:")?.trim();
+        if (!message) {
+            alert("Commit cancelled.");
+            return;
+        }
+
+        const prOutput = document.getElementById("prOutput");
+        prOutput.innerText = "Waiting for server response...";
+
+        fetch("/git/create-pr-with-edits?commit_msg=" + encodeURIComponent(message), { method: "POST" })
             .then(resp => resp.text())
             .then(text => {
-                document.getElementById("prOutput").innerText = text;
+                text = text.trim();
+                const words = text.split(/\s+/);
+
+                if (words.length === 1 && (text.startsWith("http://") || text.startsWith("https://"))) {
+                    // Single link
+                    prOutput.innerHTML = '<a href="' + text + '" target="_blank">' + text + '</a>';
+                } else {
+                    // Regular text or multi-line output
+                    prOutput.innerText = text;
+                }
             })
             .catch(err => {
-                document.getElementById("prOutput").innerText = "Error: " + err;
-            });
+                prOutput.innerText = "Error: " + err;
+            }).finally(refreshDiff);
     }
-    document.getElementById("gitForm").onsubmit = async function(event) {
+
+    document.getElementById("gitForm").onsubmit = function(event) {
             event.preventDefault();
             let commandStr = document.getElementById("command").value.trim();
 
@@ -126,20 +166,68 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
             }
 
             let commandParts = commandStr.split(" ");
-            let response = await fetch("/git/run", {
+            document.getElementById("output").innerText = "Waiting for server response...";
+            fetch("/git/run", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ command: commandParts })
-            });
-            let result = await response.text();
-            document.getElementById("output").innerText = result;
+            }).then(x => x.text()).then(x => {
+              document.getElementById("output").innerText = x;
+            }).catch(err => {
+                document.getElementById("output").innerText = "Error: " + err;
+            }).finally(refreshDiff);
         };
+
+
+     // This formats the git diff output to add colors like GitHub
+    function formatGitDiff(diffText) {
+        const lines = diffText.split('\n');
+        return lines.map(line => {
+            if (line.startsWith('+') && !line.startsWith('+++')) {
+                return '<span class="diff-addition">' + escapeHtml(line) + '</span>';
+            } else if (line.startsWith('-') && !line.startsWith('---')) {
+                return '<span class="diff-deletion">' + escapeHtml(line) + '</span>';
+            } else if (line.startsWith('@@')) {
+                return '<span class="diff-hunk">' + escapeHtml(line) + '</span>';
+            } else {
+                return escapeHtml(line);
+            }
+        }).join('\n');
+    }
+
+    function escapeHtml(text) {
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    async function refreshDiff() {
+      const resp = await fetch("/diff");
+      const rawDiff = await resp.text();
+      document.getElementById("diffOutput").innerHTML = formatGitDiff(rawDiff);
+    }
+
+    window.onload = refreshDiff;
+
     </script>
 </body>
-</html>`, gitStatus)
+</html>`)
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
+}
+
+func diffHandler(w http.ResponseWriter, r *http.Request) {
+	gitDiff, err := runGit("diff")
+	if err != nil {
+		http.Error(w, "Failed to get git diff: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Send plain diff text (you could also return JSON if needed)
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(gitDiff))
 }
 
 // gitCommandHandler: Executes Git commands via POST request
@@ -192,6 +280,7 @@ func gitCommandHandler(w http.ResponseWriter, r *http.Request) {
 
 // createPRHandler: Creates a PR after committing main.bean to edit branch
 func createPrHandler(w http.ResponseWriter, r *http.Request) {
+
 	// Step 1: Get current branch
 	currentBranch, err := runGit("rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -200,23 +289,23 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	currentBranch = strings.TrimSpace(currentBranch)
 
-	// Defer switch back to main
-	defer func() {
-		_, err := runGit("checkout", "main")
-		if err != nil {
-			log.Printf("Failed to switch back to main branch: %v", err)
-		}
-		_, err = runGit("pull", "origin", "main")
-		if err != nil {
-			log.Printf("Failed to pull origin main: %v", err)
-		}
-	}()
-
 	// Step 2: Switch to "edit" branch if not already on it
+	// Merge origin/edit if it exists
 	if currentBranch != "edit" {
 		_, err := runGit("checkout", "-B", "edit")
 		if err != nil {
 			http.Error(w, "Failed to switch to edit branch: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Check if origin/edit exists
+	_, err = runGit("ls-remote", "--exit-code", "--heads", "origin", "edit")
+	if err == nil {
+		// origin/edit exists, merge it too
+		_, err = runGit("merge", "origin/edit")
+		if err != nil {
+			http.Error(w, "Failed to merge origin/edit: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -235,7 +324,14 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			// There are staged changes
-			_, err = runGit("commit", "-m", "add data")
+			commitMsg := r.URL.Query().Get("commit_msg")
+			if commitMsg == "" {
+				commitMsg = "Add data"
+			}
+			if len(commitMsg) > 300 {
+				commitMsg = commitMsg[:300] + "…"
+			}
+			_, err = runGit("commit", "-m", commitMsg)
 			if err != nil {
 				http.Error(w, "Commit failed: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -246,19 +342,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		fmt.Fprintf(w, "No changes to commit")
-		log.Println("No changes to commit.")
 		return
-	}
-
-	// Check if origin/edit exists
-	_, err = runGit("ls-remote", "--exit-code", "--heads", "origin", "edit")
-	if err == nil {
-		// origin/edit exists, merge it too
-		_, err = runGit("merge", "origin/edit")
-		if err != nil {
-			http.Error(w, "Failed to merge origin/edit: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
 	}
 
 	// Step 5: Push the branch to origin
@@ -268,11 +352,38 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 6: Create PR
+	// Step 6: Check if an open PR already exists for 'edit' branch
+	checkPRCmd := exec.Command("gh", "pr", "list", "--head", "edit", "--state", "open")
+	checkPRCmd.Dir = gitRepoPath
+	var out bytes.Buffer
+	checkPRCmd.Stdout = &out
+	checkPRCmd.Stderr = &out
+
+	if err := checkPRCmd.Run(); err != nil {
+		w.Write([]byte("Error checking for existing PR:\n" + out.String()))
+		return
+	}
+
+	if strings.TrimSpace(out.String()) != "" {
+		// An open PR already exists for 'edit'
+		checkPRCmd = exec.Command("gh", "pr", "view", "edit", "--json", "url", "-t", "{{.url}}\n")
+		checkPRCmd.Dir = gitRepoPath
+		out = bytes.Buffer{}
+		checkPRCmd.Stdout = &out
+		checkPRCmd.Stderr = &out
+		if err := checkPRCmd.Run(); err != nil {
+			w.Write([]byte("Error listing existing PR:\n" + out.String()))
+			return
+		}
+		w.Write([]byte(out.String()))
+		return
+	}
+
+	// Step 7: Create PR since none exists
 	cmd := exec.Command("gh", "pr", "create", "--fill")
 	cmd.Dir = gitRepoPath
 
-	var out, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 
@@ -282,7 +393,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 7: Return PR output
+	// Step 8: Return PR output
 	w.Write([]byte(out.String()))
 }
 
@@ -306,5 +417,7 @@ func main() {
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/git/run", gitCommandHandler)
 	http.HandleFunc("/git/create-pr-with-edits", createPrHandler)
+	http.HandleFunc("/diff", diffHandler)
+
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
