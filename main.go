@@ -88,6 +88,15 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
       max-height: 60vh;
       }
 
+      #output {
+      border: 1px solid #ccc;
+      padding: 10px;
+      overflow-x: auto;
+      white-space: pre;
+      overflow-y: auto;
+      max-height: 40vh;
+      }
+
       .diff-addition { color: #22863a; background-color: #e6ffed; }
       .diff-deletion { color: #b31d28; background-color: #ffeef0; }
       .diff-hunk     { color: #6a737d; font-weight: bold; }
@@ -227,10 +236,6 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func diffHandler(w http.ResponseWriter, r *http.Request) {
-	header := r.Header
-	for k := range header {
-		fmt.Println(k, header.Get(k))
-	}
 	gitDiff, err := runGit("diff")
 	if err != nil {
 		http.Error(w, "Failed to get git diff: "+err.Error(), http.StatusInternalServerError)
