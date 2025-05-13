@@ -20,7 +20,7 @@ func getRepoPath() string {
 	if path, exists := os.LookupEnv("GIT_REPO_PATH"); exists {
 		return path
 	}
-	return "/Users/suman/Desktop/superview/accounting" // Change this to a reasonable fallback
+	return "/Users/suman/Desktop/projects/superview/superview-accounting" // Change this to a reasonable fallback
 }
 
 // GitCommand represents a request to run a git command.
@@ -203,7 +203,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     async function refreshDiff() {
-      const resp = await fetch("/diff");
+      const resp = await fetch("/git/diff");
       const rawDiff = await resp.text();
       document.getElementById("diffOutput").innerHTML = formatGitDiff(rawDiff);
     }
@@ -417,7 +417,7 @@ func main() {
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/git/run", gitCommandHandler)
 	http.HandleFunc("/git/create-pr-with-edits", createPrHandler)
-	http.HandleFunc("/diff", diffHandler)
+	http.HandleFunc("/git/diff", diffHandler)
 
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
