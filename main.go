@@ -382,7 +382,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 	checkPRCmd.Stderr = &out
 
 	if err := checkPRCmd.Run(); err != nil {
-		w.Write([]byte("Error checking for existing PR:\n" + out.String()))
+		w.Write([]byte("Error checking for existing PR:\n" + err.Error() + out.String()))
 		return
 	}
 
@@ -394,7 +394,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 		checkPRCmd.Stdout = &out
 		checkPRCmd.Stderr = &out
 		if err := checkPRCmd.Run(); err != nil {
-			w.Write([]byte("Error listing existing PR:\n" + out.String()))
+			w.Write([]byte("Error listing existing PR:\n" + err.Error() + out.String()))
 			return
 		}
 		w.Write([]byte(out.String()))
