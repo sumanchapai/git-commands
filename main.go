@@ -186,7 +186,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
           return;
       }
 
-      fetch("/bean-query", {
+      fetch("/git/bean-query", {
          method: "POST",
          headers: { "Content-Type": "text/plain" },
          body: commandStr
@@ -518,7 +518,7 @@ func main() {
 	http.HandleFunc("/git/run", gitCommandHandler)
 	http.HandleFunc("/git/create-pr-with-edits", createPrHandler)
 	http.HandleFunc("/git/diff", diffHandler)
-	http.HandleFunc("/bean-query", beanQueryHandler)
+	http.HandleFunc("/git/bean-query", beanQueryHandler)
 
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
