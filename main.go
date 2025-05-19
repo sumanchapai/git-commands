@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -133,7 +134,22 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
       <h3>Output:</h3>
       <pre id="output"></pre>
       </div>
+
+      <div style="border: 1px solid purple; margin-top: 2rem;">
+      <h2>Beancount Query</h2>
+      <button onclick="positiveIncome()">Positive Incomes</button>
+      <button onclick="bankCharge()">Missing bank charges for HBL Income</button>
+      <form id="beanQueryForm" style="margin-top: 1rem">
+        <input type="text" id="bean-query-command" placeholder="Enter beancount query" style="width: 80%%;">
+        <button type="submit">Run</button>
+      </form>
+
+      <h3>Output:</h3>
+      <pre id="beancount-output"></pre>
+      </div>
+
     </div>
+
 
     <div style="border: 1px solid blue; margin-top: 2rem">
     <h2 >Git Diff</h2>
@@ -144,6 +160,43 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
   </div>
 
     <script>
+
+    function positiveIncome() {
+      const input = document.getElementById("bean-query-command")
+      input.value = 'select date, lineno, account, narration, position where account ~ "Income" and narration !~ "refund" and number > 0'
+      // Submit the bean-query form
+      document.getElementById("beanQueryForm").requestSubmit()
+    }
+
+    function bankCharge() {
+      const input = document.getElementById("bean-query-command")
+      input.value = 'select date, lineno, account, position where has_account("Assets:Bank:HBL") and has_account("Income") and account = "Assets:Bank:HBL" and not has_account("Expenses:BankCharge") and flag = "*"'
+
+      // Submit the bean-query form
+      document.getElementById("beanQueryForm").requestSubmit()
+    }
+
+    document.getElementById("beanQueryForm").onsubmit = function(event) {
+      console.log("foobar")
+      event.preventDefault()
+      const commandStr = document.getElementById("bean-query-command").value.trim()
+
+      if (commandStr.length === 0) {
+          alert("Please enter a command.");
+          return;
+      }
+
+      fetch("/bean-query", {
+         method: "POST",
+         headers: { "Content-Type": "text/plain" },
+         body: commandStr
+      }).then(x => x.text()).then(x => {
+        document.getElementById("beancount-output").innerText = x;
+      }).catch(err => {
+          document.getElementById("beancount-output").innerText = "Error: " + err;
+      });
+    }
+
     function createPR() {
         let message = prompt("Enter your commit message:")?.trim();
         if (!message) {
@@ -419,6 +472,31 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(out.String()))
 }
 
+func beanQueryHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the query string
+	queryString, err := io.ReadAll(r.Body)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error reading query string %v", err.Error())
+		http.Error(w, errMsg, http.StatusInternalServerError)
+	}
+	// Execute the command
+	cmd := exec.Command("bean-query", "main.bean", string(queryString))
+	cmd.Dir = gitRepoPath
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		http.Error(w, "Failed to create PR: "+stderr.String()+"\n"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 8: Return PR output
+	w.Write([]byte(out.String()))
+}
+
 // main starts the server
 func main() {
 	// Parse optional port argument
@@ -440,6 +518,7 @@ func main() {
 	http.HandleFunc("/git/run", gitCommandHandler)
 	http.HandleFunc("/git/create-pr-with-edits", createPrHandler)
 	http.HandleFunc("/git/diff", diffHandler)
+	http.HandleFunc("/bean-query", beanQueryHandler)
 
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
