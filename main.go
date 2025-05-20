@@ -15,7 +15,8 @@ import (
 )
 
 // Get Git repository path from ENV variable, fallback if not set
-var gitRepoPath = getRepoPath()
+var GitRepoPath = getRepoPath()
+var HBLReportsDir = filepath.Join(GitRepoPath, "hbl-swipe-statements/reports")
 
 func getRepoURL() string {
 	if path, exists := os.LookupEnv("GIT_REPO_URL"); exists {
@@ -39,7 +40,7 @@ type GitCommand struct {
 // runGit executes a git command inside the Git repo directory.
 func runGit(command ...string) (string, error) {
 	cmd := exec.Command("git", command...)
-	cmd.Dir = gitRepoPath // Enforce the working directory
+	cmd.Dir = GitRepoPath // Enforce the working directory
 
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -394,7 +395,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Step 4: Check for staged changes
 	diffCmd := exec.Command("git", "diff", "--cached", "--quiet")
-	diffCmd.Dir = gitRepoPath
+	diffCmd.Dir = GitRepoPath
 	err = diffCmd.Run()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -434,7 +435,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Step 6: Check if an open PR already exists for 'edit' branch
 	checkPRCmd := exec.Command("gh", "pr", "list", "--head", "edit", "--state", "open")
-	checkPRCmd.Dir = gitRepoPath
+	checkPRCmd.Dir = GitRepoPath
 	var out bytes.Buffer
 	checkPRCmd.Stdout = &out
 	checkPRCmd.Stderr = &out
@@ -447,7 +448,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(out.String()) != "" {
 		// An open PR already exists for 'edit'
 		checkPRCmd = exec.Command("gh", "pr", "view", "edit", "--json", "url", "-t", "{{.url}}\n")
-		checkPRCmd.Dir = gitRepoPath
+		checkPRCmd.Dir = GitRepoPath
 		out = bytes.Buffer{}
 		checkPRCmd.Stdout = &out
 		checkPRCmd.Stderr = &out
@@ -461,7 +462,7 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Step 7: Create PR since none exists
 	cmd := exec.Command("gh", "pr", "create", "--fill")
-	cmd.Dir = gitRepoPath
+	cmd.Dir = GitRepoPath
 
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -486,7 +487,7 @@ func beanQueryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Execute the command
 	cmd := exec.Command("bean-query", "main.bean", string(queryString))
-	cmd.Dir = gitRepoPath
+	cmd.Dir = GitRepoPath
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -509,17 +510,13 @@ func main() {
 	flag.Parse()
 
 	// Ensure the Git repo directory exists
-	absPath, err := filepath.Abs(gitRepoPath)
+	absPath, err := filepath.Abs(GitRepoPath)
 	if err != nil {
 		log.Fatalf("Invalid repo path: %v", err)
 	}
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
 		log.Fatalf("Git repo directory does not exist: %s", absPath)
 	}
-
-	staticDir := filepath.Join(gitRepoPath, "hbl-swipe-statements/reports")
-	fmt.Println(staticDir)
-	fs := http.FileServer(http.Dir(staticDir))
 
 	addr := "127.0.0.1:" + *port
 	log.Println("Git server running on", addr, "in directory:", absPath)
@@ -528,6 +525,8 @@ func main() {
 	http.HandleFunc("/git/create-pr-with-edits", createPrHandler)
 	http.HandleFunc("/git/diff", diffHandler)
 	http.HandleFunc("/git/bean-query", beanQueryHandler)
+
+	fs := http.FileServer(http.Dir(HBLReportsDir))
 	http.Handle("/git/hbl/", http.StripPrefix("/git/hbl/", fs))
 
 	log.Fatal(http.ListenAndServe(addr, nil))
