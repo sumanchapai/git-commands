@@ -148,6 +148,11 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
       <pre id="beancount-output"></pre>
       </div>
 
+      <div style="border: 1px solid orange; margin-top: 2rem;">
+      <h2>HBL Swipe Statements</h2>
+      <a href="/git/hbl">View Reports</a>
+      </div>
+
     </div>
 
 
@@ -512,6 +517,10 @@ func main() {
 		log.Fatalf("Git repo directory does not exist: %s", absPath)
 	}
 
+	staticDir := filepath.Join(gitRepoPath, "hbl-swipe-statements/reports")
+	fmt.Println(staticDir)
+	fs := http.FileServer(http.Dir(staticDir))
+
 	addr := "127.0.0.1:" + *port
 	log.Println("Git server running on", addr, "in directory:", absPath)
 	http.HandleFunc("/", rootHandler)
@@ -519,6 +528,7 @@ func main() {
 	http.HandleFunc("/git/create-pr-with-edits", createPrHandler)
 	http.HandleFunc("/git/diff", diffHandler)
 	http.HandleFunc("/git/bean-query", beanQueryHandler)
+	http.Handle("/git/hbl/", http.StripPrefix("/git/hbl/", fs))
 
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
