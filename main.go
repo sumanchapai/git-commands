@@ -181,7 +181,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
     function bankCharge() {
       const input = document.getElementById("bean-query-command")
-      input.value = 'select date, lineno, account, position where has_account("Assets:Bank:HBL") and has_account("Income") and account = "Assets:Bank:HBL" and not has_account("Expenses:BankCharge") and flag = "*"'
+      input.value = 'select date, lineno, account, position, narration where has_account("Assets:Bank:HBL") and has_account("Income") and account = "Assets:Bank:HBL" and not has_account("Expenses:BankCharge") and flag = "*"'
 
       // Submit the bean-query form
       document.getElementById("beanQueryForm").requestSubmit()
