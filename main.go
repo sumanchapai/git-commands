@@ -6,12 +6,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // Get Git repository path from ENV variable, fallback if not set
@@ -152,6 +155,8 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
       <div style="border: 1px solid orange; margin-top: 2rem;">
       <h2>HBL Swipe Statements</h2>
       <a href="/git/hbl">View Reports</a>
+      <div style="margin-top: 1rem"><button onclick="fetchLatestSwipeStatements()">Fetch Latest</button></div>
+      <pre id="hblfetchresult"></pre>
       </div>
 
     </div>
@@ -282,6 +287,16 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
       const resp = await fetch("/git/diff");
       const rawDiff = await resp.text();
       document.getElementById("diffOutput").innerHTML = formatGitDiff(rawDiff);
+    }
+
+    function fetchLatestSwipeStatements() {
+        document.getElementById("hblfetchresult").innerText = "Loading...";
+        fetch("/git/fetch-latest-hbl")
+          .then(x => x.text()).then(x => {
+          document.getElementById("hblfetchresult").innerText = x;
+          }).catch(err => {
+              document.getElementById("hblfetchresult").innerText = "Error: " + err;
+          });
     }
 
     window.onload = refreshDiff;
@@ -503,6 +518,66 @@ func beanQueryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(out.String()))
 }
 
+// Get the date for which there exists HBL swipe statement in the HBLReportsDir
+// If no date exists, get some arbitrary default date
+func lastReportDate() (string, error) {
+	re := regexp.MustCompile(`^report-(\d{4}-\d{2}-\d{2})\.(?:pdf|no-data)$`)
+	latest := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	err := filepath.WalkDir(HBLReportsDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		filename := d.Name()
+		matches := re.FindStringSubmatch(filename)
+		if len(matches) == 2 {
+			dateStr := matches[1]
+			date, err := time.Parse("2006-01-02", dateStr)
+			if err != nil {
+				return err
+			}
+			if date.After(latest) {
+				latest = date
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+	if latest.IsZero() {
+		return "", fmt.Errorf("no matching report files found")
+	}
+	return latest.Format("2006-01-02"), nil
+}
+
+func fetchLatestHBLSwipesHandler(w http.ResponseWriter, r *http.Request) {
+	dateFormat := "2006-01-02"
+	fromDate, err := lastReportDate()
+	if err != nil {
+		http.Error(w, "Failed to get last report date: "+"\n"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	todayDate := time.Now().Format(dateFormat)
+	// Execute the command
+	cmd := exec.Command("go", "run", "download.go", fromDate, todayDate)
+	cmd.Dir = filepath.Join(HBLReportsDir, "..")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		http.Error(w, "Failed to download HBL reports: "+stderr.String()+"\n"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 8: Return PR output
+	w.Write([]byte(out.String()))
+}
+
 // main starts the server
 func main() {
 	// Parse optional port argument
@@ -528,6 +603,10 @@ func main() {
 
 	fs := http.FileServer(http.Dir(HBLReportsDir))
 	http.Handle("/git/hbl/", http.StripPrefix("/git/hbl/", fs))
+	// TODO:
+	// Global rate limit this API to prevent overwhelming HBL server.
+	// 10 requests per day max
+	http.HandleFunc("/git/fetch-latest-hbl/", fetchLatestHBLSwipesHandler)
 
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
