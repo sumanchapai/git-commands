@@ -186,7 +186,12 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
       <div style="border: 1px solid orange; margin-top: 2rem;">
       <h2>HBL Swipe Statements</h2>
       <a href="/git/hbl">View Reports</a>
-      <div style="margin-top: 1rem"><button onclick="fetchLatestSwipeStatements()">Fetch Latest</button></div>
+      <div style="margin-top: 1rem">
+        <form id="hblReportQueryForm"/>
+        <input id="hbl-report-date" type="date" required />
+        <input type="submit" value="Fetch"/>
+      </div>
+      <div style="margin-top: 1rem"><button onclick="fetchLatestSwipeStatements()">Fetch All Latest</button></div>
       <pre id="hblfetchresult"></pre>
       </div>
 
@@ -219,7 +224,6 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     document.getElementById("beanQueryForm").onsubmit = function(event) {
-      console.log("foobar")
       event.preventDefault()
       const commandStr = document.getElementById("bean-query-command").value.trim()
 
@@ -328,6 +332,18 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
           }).catch(err => {
               document.getElementById("hblfetchresult").innerText = "Error: " + err;
           });
+    }
+
+    document.getElementById("hblReportQueryForm").onsubmit = function(event) {
+      event.preventDefault()
+      const date = document.getElementById("hbl-report-date").value
+      document.getElementById("hblfetchresult").innerText = "Loading...";
+      fetch("/git/fetch-hbl-report/?date=" + date)
+        .then(x => x.text()).then(x => {
+        document.getElementById("hblfetchresult").innerText = x;
+        }).catch(err => {
+            document.getElementById("hblfetchresult").innerText = "Error: " + err;
+        });
     }
 
     window.onload = refreshDiff;
@@ -627,6 +643,32 @@ func fetchLatestHBLSwipesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(out.String()))
 }
 
+func fetchHBLReportHandler(w http.ResponseWriter, r *http.Request) {
+	dateFormat := "2006-01-02"
+	fromDate := r.URL.Query().Get("date")
+	_, err := time.Parse(dateFormat, fromDate)
+	if err != nil {
+		http.Error(w, "Invalid date string: "+"\n"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Execute the command
+	cmd := exec.Command("go", "run", "download.go", fromDate, fromDate)
+	cmd.Dir = filepath.Join(HBLReportsDir, "..")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		http.Error(w, "Failed to download HBL reports: "+stderr.String()+"\n"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 8: Return PR output
+	w.Write([]byte(out.String()))
+}
+
 // main starts the server
 func main() {
 	// Parse optional port argument
@@ -656,6 +698,7 @@ func main() {
 	// Global rate limit this API to prevent overwhelming HBL server.
 	// 10 requests per day max
 	http.HandleFunc("/git/fetch-latest-hbl/", fetchLatestHBLSwipesHandler)
+	http.HandleFunc("/git/fetch-hbl-report/", fetchHBLReportHandler)
 
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
