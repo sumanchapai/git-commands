@@ -421,6 +421,13 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch from origin
+	_, err = runGit("fetch", "origin")
+	if err != nil {
+		http.Error(w, "Failed to fetch origin: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	// Check if origin/edit exists
 	_, err = runGit("ls-remote", "--exit-code", "--heads", "origin", "edit")
 	if err == nil {
@@ -428,6 +435,17 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 		_, err = runGit("merge", "origin/edit")
 		if err != nil {
 			http.Error(w, "Failed to merge origin/edit: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Merge origin/main if exists
+	_, err = runGit("ls-remote", "--exit-code", "--heads", "origin", "main")
+	if err == nil {
+		// origin/main exists, merge it too
+		_, err = runGit("merge", "origin/main")
+		if err != nil {
+			http.Error(w, "Failed to merge origin/main: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
