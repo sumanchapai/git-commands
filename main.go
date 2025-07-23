@@ -168,6 +168,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
       <div style="border: 1px solid purple; margin-top: 2rem;">
       <h2>Beancount Query</h2>
+      <p>To ignore positive income that is intented, mention "intended positive" in narration.</p>
       <button onclick="positiveIncome()">Positive Incomes</button>
       <button onclick="bankCharge()">Missing bank charges for HBL Income</button>
       <form id="beanQueryForm" style="margin-top: 1rem">
@@ -210,7 +211,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
     function positiveIncome() {
       const input = document.getElementById("bean-query-command")
-      input.value = 'select date, lineno, account, narration, position where account ~ "Income" and narration !~ "refund" and number > 0'
+      input.value = 'select date, lineno, account, narration, position where account ~ "Income" and narration !~ "refund" and narration !~ "intended positive" and number > 0'
       // Submit the bean-query form
       document.getElementById("beanQueryForm").requestSubmit()
     }
