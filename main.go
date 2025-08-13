@@ -35,15 +35,6 @@ func getRepoPath() string {
 	return "/Users/suman/Desktop/projects/superview/superview-accounting"
 }
 
-func makeQueriesString() string {
-	var v strings.Builder
-	for _, q := range beancountQueries {
-		v.WriteString(fmt.Sprintf(`<div>
-      <pre style='border: 1px solid black; padding: 8px 4px'>%v</pre></div>`, q.query))
-	}
-	return v.String()
-}
-
 // GitCommand represents a request to run a git command.
 type GitCommand struct {
 	Command []string `json:"command"`
@@ -79,24 +70,6 @@ var allowedCommands = map[string]bool{
 	"branch":   true,
 	"reset":    true,
 	"merge":    true,
-}
-
-var beancountQueries = []struct {
-	query string
-}{
-	{`
-SELECT
-    YEAR(date) AS year,
-    MONTH(date) AS month,
-    account,
-    SUM(position) AS total
-WHERE
-    account ~ "Income:Room" OR account ~ "Income:Restaurant"
-GROUP BY
-    year, month, account
-ORDER BY
-    year ASC, month ASC, account ASC
-      `},
 }
 
 // rootHandler: Serve the main page with Git status and a command input form
@@ -147,6 +120,9 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
     </style>
 </head>
 <body>
+  <a href="/">&larr; Back to Beancount</a>
+  </br>
+  </br>
   <a href="%s">%s</a>
   <div class="responsive-grid">
     <div>
@@ -178,10 +154,6 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
       <h3>Output:</h3>
       <pre id="beancount-output"></pre>
-      </div>
-      <div>
-        <p>Other helpful queries:</p>
-        %v
       </div>
 
       <div style="border: 1px solid orange; margin-top: 2rem;">
@@ -351,7 +323,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
     </script>
 </body>
-</html>`, getRepoURL(), getRepoURL(), makeQueriesString())
+</html>`, getRepoURL(), getRepoURL())
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
