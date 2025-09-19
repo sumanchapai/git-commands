@@ -439,8 +439,8 @@ func createPrHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 3: Add main.bean
-	_, err = runGit("add", "main.bean")
+	// Step 3: Add all staged files
+	_, err = runGit("add", ".")
 	if err != nil {
 		http.Error(w, "Failed to add file: "+err.Error(), http.StatusInternalServerError)
 		return
